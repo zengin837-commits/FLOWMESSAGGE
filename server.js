@@ -38,11 +38,8 @@ io.on('connection', socket => {
 });
 
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ MongoDB bağlandı'))
-  .catch(err => console.error('❌ MongoDB hatası:', err));
+  .then(() => console.log('MongoDB baglandi'))
+  .catch(err => console.error('MongoDB hatasi:', err));
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Sunucu ${PORT} portunda çalışıyor`));
-```
-
----
+server.listen(PORT, () => console.log('Sunucu ' + PORT + ' portunda calisiyor'));

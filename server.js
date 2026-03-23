@@ -28,18 +28,30 @@ app.get('*', (req, res) =>
 );
 
 io.on('connection', socket => {
+  console.log('Yeni socket baglantisi:', socket.id);
+
   socket.on('join', token => {
     try {
       const jwt  = require('jsonwebtoken');
       const user = jwt.verify(token, process.env.JWT_SECRET);
       socket.join(user.id.toString());
-    } catch {}
+      console.log('Kullanici odaya katildi:', user.id.toString());
+      socket.emit('joined', { userId: user.id });
+    } catch(e) {
+      console.log('Join hatasi:', e.message);
+    }
   });
 });
 
-mongoose.connect(process.env.MONGO_URI)
+const MONGO_URI = process.env.MONGO_URI
+              || process.env.MONGO_URL
+              || process.env.MONGODB_URL
+              || process.env.MONGODB_URI
+              || process.env.DATABASE_URL;
+
+mongoose.connect(MONGO_URI)
   .then(() => console.log('MongoDB baglandi'))
-  .catch(err => console.error('MongoDB hatasi:', err));
+  .catch(err => console.error('MongoDB hatasi:', err.message));
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log('Sunucu ' + PORT + ' portunda calisiyor'));

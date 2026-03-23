@@ -55,8 +55,13 @@ async function startSocket(userId, method, phoneNumber) {
   }
 
   sock.ev.on('connection.update', async (update) => {
-    console.log('connection.update:', JSON.stringify(update));
     const { connection, lastDisconnect, qr } = update;
+
+    // HATA DETAYI
+    if (lastDisconnect?.error) {
+      console.log('Hata detayi:', lastDisconnect.error.message);
+      console.log('Hata output:', JSON.stringify(lastDisconnect.error.output));
+    }
 
     if (qr) {
       try {
@@ -104,13 +109,11 @@ router.post('/connect/qr', auth, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Eski socket kapat
     if (global.activeSockets[userId]) {
       try { global.activeSockets[userId].sock?.end(); } catch(e) {}
       delete global.activeSockets[userId];
     }
 
-    // Eski session dosyalarını temizle (QR üretilmesi için şart)
     const authFolder = path.join('/tmp/sessions', userId.toString());
     if (fs.existsSync(authFolder)) {
       fs.rmSync(authFolder, { recursive: true });

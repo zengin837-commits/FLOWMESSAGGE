@@ -225,6 +225,7 @@ let selected = new Set();
 let socket = null;
 let waConnected = false;
 let connectMethod = 'qr';
+let socketJoined = false;
 
 window.onload = () => {
   if (token) showApp();
@@ -271,6 +272,7 @@ function initSocket() {
 
   socket.on('connect', () => {
     console.log('Socket baglandi:', socket.id);
+    socketJoined = false;
     socket.emit('join', token);
   });
 
@@ -280,16 +282,17 @@ function initSocket() {
 
   socket.on('joined', (d) => {
     console.log('Odaya katilindi:', d.userId);
+    socketJoined = true;
   });
 
   socket.on('qr', (d) => {
     console.log('QR alindi!');
     document.getElementById('qr-img').src = d.qr;
     document.getElementById('qr-wrap').style.display = 'block';
-    document.getElementById('qr-hint').textContent = 'WhatsApp → Bagli Cihazlar → Cihaz Ekle → QR tara';
+    document.getElementById('qr-hint').textContent = 'WhatsApp → Bağlı Cihazlar → Cihaz Ekle → QR tara';
   });
 
-  socket.on('pairing_code', (d) => {
+socket.on('pairing_code', (d) => {
     const el = document.getElementById('pairing-code-box');
     el.textContent = d.code;
     el.style.display = 'block';
@@ -299,7 +302,7 @@ function initSocket() {
   socket.on('disconnected', () => setWaStatus(false));
   socket.on('send_progress', d => updateProgress(d));
   socket.on('send_complete', d => {
-    showToast('Tamamlandi: ' + d.sent + ' basarili, ' + d.failed + ' hatali');
+    showToast('Tamamlandı: ' + d.sent + ' başarılı, ' + d.failed + ' hatalı');
     document.getElementById('progress-wrap').style.display = 'none';
     document.getElementById('send-btn').disabled = false;
     document.getElementById('send-btn').textContent = '✈️ Toplu Gönder';
@@ -337,10 +340,29 @@ async function doConnect() {
     if (connectMethod === 'qr') {
       document.getElementById('qr-hint').textContent = 'QR kod yükleniyor...';
       document.getElementById('qr-wrap').style.display = 'block';
+      document.getElementById('qr-img').src = '';
+
+      if (!socketJoined) {
+        await new Promise((resolve) => {
+          const timeout = setTimeout(resolve, 3000);
+          socket.once('joined', () => { clearTimeout(timeout); resolve(); });
+          socket.emit('join', token);
+        });
+      }
+
       await apiFetch('/api/whatsapp/connect/qr', 'POST');
     } else {
       const phone = document.getElementById('phone-input').value.trim();
       if (!phone) { showToast('Telefon numarası girin'); return; }
+
+      if (!socketJoined) {
+        await new Promise((resolve) => {
+          const timeout = setTimeout(resolve, 3000);
+          socket.once('joined', () => { clearTimeout(timeout); resolve(); });
+          socket.emit('join', token);
+        });
+      }
+
       await apiFetch('/api/whatsapp/connect/phone', 'POST', { phone });
       showToast('Eşleştirme kodu bekleniyor...');
     }
@@ -360,7 +382,7 @@ async function loadGroups() {
     const data = await res.json();
     groups = data.groups || [];
     renderGroups(groups);
-  } catch (e) { showToast('Gruplar yuklenemedi'); }
+  } catch (e) { showToast('Gruplar yüklenemedi'); }
 }
 
 function renderGroups(list) {
@@ -384,49 +406,63 @@ function toggleGroup(id) {
   renderGroups(groups);
 }
 
-function selectAll()   { groups.forEach(g => selected.add(g.id));  renderGroups(groups); }
-function deselectAll() { selected.clear(); renderGroups(groups); }
+function filterGroups(q) {
+  const filtered = groups.filter(g => g.name.toLowerCase().includes(q.toLowerCase()));
+  renderGroups(filtered);
+}
 
-function filterGroups(v) {
-  renderGroups(groups.filter(g => g.name.toLowerCase().includes(v.toLowerCase())));
+function selectAll() {
+  groups.forEach(g => selected.add(g.id));
+  renderGroups(groups);
+}
+
+function deselectAll() {
+  selected.clear();
+  renderGroups(groups);
 }
 
 function updateSelInfo() {
-  document.getElementById('sel-info').textContent        = selected.size + ' grup seçili';
+  document.getElementById('sel-info').textContent = selected.size + ' grup seçili';
   document.getElementById('msg-group-count').textContent = selected.size;
 }
 
 function updateCharCount() {
-  document.getElementById('char-num').textContent = document.getElementById('msg-text').value.length;
+  const len = document.getElementById('msg-text').value.length;
+  document.getElementById('char-num').textContent = len;
 }
 
 async function doSend() {
-  if (!waConnected)   { showToast('WhatsApp bagli degil'); return; }
-  if (!selected.size) { showToast('En az bir grup secin'); goPage('groups'); return; }
-  const message = document.getElementById('msg-text').value.trim();
-  if (!message)       { showToast('Mesaj bos olamaz'); return; }
-  const minDelay = parseInt(document.getElementById('min-delay').value) * 1000;
-  const maxDelay = parseInt(document.getElementById('max-delay').value) * 1000;
-  document.getElementById('send-btn').disabled    = true;
-  document.getElementById('send-btn').textContent = 'Gonderiliyor...';
+  if (!waConnected) { showToast('Önce WhatsApp bağlayın'); return; }
+  if (selected.size === 0) { showToast('En az bir grup seçin'); return; }
+  const text = document.getElementById('msg-text').value.trim();
+  if (!text) { showToast('Mesaj yazın'); return; }
+  const minDelay = parseInt(document.getElementById('min-delay').value) || 3;
+  const maxDelay = parseInt(document.getElementById('max-delay').value) || 8;
+
   document.getElementById('progress-wrap').style.display = 'block';
-  document.getElementById('progress-fill').style.width   = '0%';
-  document.getElementById('progress-num').textContent    = '0/' + selected.size;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('send-btn').textContent = 'Gönderiliyor...';
+
   try {
     await apiFetch('/api/messages/send', 'POST', {
-      groups: [...selected], message, minDelay, maxDelay
+      groupIds: Array.from(selected),
+      message: text,
+      minDelay,
+      maxDelay
     });
   } catch (e) {
     showToast('Hata: ' + e.message);
+    document.getElementById('progress-wrap').style.display = 'none';
     document.getElementById('send-btn').disabled = false;
+    document.getElementById('send-btn').textContent = '✈️ Toplu Gönder';
   }
 }
 
 function updateProgress(d) {
-  const pct = Math.round(((d.sent + d.failed) / d.total) * 100);
+  const pct = Math.round((d.current / d.total) * 100);
   document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('progress-num').textContent  = (d.sent + d.failed) + '/' + d.total;
-  document.getElementById('progress-text').textContent = d.status === 'ok' ? 'Gonderildi' : 'Hata';
+  document.getElementById('progress-text').textContent = d.status || 'Gönderiliyor...';
+  document.getElementById('progress-num').textContent = d.current + '/' + d.total;
 }
 
 function goPage(name) {
